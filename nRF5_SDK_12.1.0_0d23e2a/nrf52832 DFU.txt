@@ -1,0 +1,73 @@
+nrf52832 DFU关键说明：
+例:
+APP程序为:
+\nRF5_SDK_12.1.0_0d23e2a\examples\ble_central_and_peripheral\experimental\ble_heart_oxygen\pca10040\s132\arm5_no_packs
+Bootloader程序为:
+\nRF5_SDK_12.1.0_0d23e2a\examples\dfu\bootloader_secure\pca10040\arm5_no_packs
+
+一、编译Bootloader
+1、修改文件
+(1)使用命令
+nrfutil.exe keys generate private.pem
+生成秘钥文件
+
+(2)使用命令
+nrfutil.exe keys display--可以抛开--format code private.pem --out_file public_key.c
+生成秘钥对应的.c文件。
+
+(3)将public_key.c中
+ __ALIGN(4) const uint8_t pk[64] =
+{
+    0xcd, 0x6e, 0x28, 0xa4, 0x3d, 0x01, 0xa5, 0x81, 0xdf, 0xf6, 0xbf, 0x82, 0x5b, 0xcd, 0xf1, 0xf3, 0xf3, 0xd0, 0xfd, 0xeb, 0x2e, 0xe1, 0x5a, 0x79, 0xe8, 0x84, 0x11, 0xe9, 0x1c, 0xc8, 0x33, 0x79, 
+    0x4a, 0x40, 0x06, 0x54, 0x9b, 0x9f, 0x17, 0xd1, 0xdd, 0x9f, 0xeb, 0xa9, 0xd7, 0xf6, 0x87, 0xbb, 0x77, 0xa0, 0xc4, 0xda, 0xd5, 0xb4, 0x4a, 0xfa, 0x72, 0xb4, 0xd2, 0xdc, 0x9a, 0x7b, 0x83, 0x0e
+};
+复制到dfu_public_key.c中的#error "Debug public key not valid for production. Please see https://github.com/NordicSemiconductor/pc-nrfutil/blob/master/README.md to generate it"下面，且屏蔽掉这一句。
+
+(4)编译。
+编译会报错，关于uECC.h的报错。解决办法参考
+https://blog.csdn.net/jdsnpgxj/article/details/80772727
+
+二、修改APP工程，增加DFU功能。
+1、修改 services_init(); 函数如下
+ uint32_t err_code;
+	  ble_dfu_init_t dfus_init;
+	
+	  memset( &dfus_init, 0, sizeof(dfus_init) );
+	
+	  dfus_init.evt_handler								              = ble_dfu_evt_handler;
+    dfus_init.ctrl_point_security_req_write_perm		  = SEC_SIGNED;
+    dfus_init.ctrl_point_security_req_cccd_write_perm	= SEC_SIGNED;
+			
+    err_code = ble_dfu_init(&m_dfus, &dfus_init);
+    APP_ERROR_CHECK(err_code);
+增加DFU服务功能。(增加次功能的同时要增加对应的一些文件，在编译报错的时候可以看到需要增加那些文件)。
+
+2、修改DFU服务的特征(static uint32_t rx_char_add(ble_dfu_t * p_dfu, const ble_dfu_init_t * p_dfu_init))，增加特征的WRITE属性。
+    char_md.char_props.notify = 1;
+--->char_md.char_props.write  = 1;          //增加这一条
+    char_md.p_char_user_desc  = NULL;
+    char_md.p_char_pf         = NULL;
+    char_md.p_user_desc_md    = NULL;
+    char_md.p_cccd_md         = &cccd_md;
+    char_md.p_sccd_md         = NULL;
+	
+3、编译。
+
+三、下载协议栈和Bootloader使用nRFgo Studio只下载协议栈的.hex文件和bootloader的.hex文件。不下载APP的.hex。App要通过蓝牙固件升级发送进去，不然后期的固件无法升级成功。
+
+四、打包APP
+(此处先假设APP.hex的路径为.\app.hex，private.pem的路径为.\private.pem)
+使用命令
+nrfutil pkg generate --hw-version 52 --sd-req 0x8C --application-version 0x01 --application .\app.hex --key-file .\private.pem cq_band.zip
+打包生成cq_band.zip
+
+命令详细说明
+--hw-version 52             使用的芯片型号是52系列的
+--sd-req 0x8C               使用的协议栈代号(可以通过nRFgo Studio的program SoftDevice->verify获取)
+--application-version       应用程序的版本号，可以随便定义
+--application .\app.hex     应用程序路径
+--key-file .\private.pem    秘钥路径(该秘钥必须是Bootloader中使用的那个秘钥)
+cq_band.zip                 打包生成的文件(必须为:xxxx.zip)
+
+
+
